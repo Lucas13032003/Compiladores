@@ -1,17 +1,59 @@
 ?start     : program
 
-program    : stmt*
+program    : declarations*
 
-?stmt      : expr ";"
+declarations : fun_decl
+             | var_dec
+             | stmt
+
+
+?stmt      : expr_stmt
            | print_cmd
-           // | if_cmd
-           // | for_cmd
-           // | ...
+           | if_cmd
+           | for_cmd
+           | while_cmd 
+           | block
+           | return_stmt  
+
+return_stmt : "return" expr? ";"
+
+           
+for_cmd   : "for" "(" for_init for_cond ";" for_incr ")" stmt -> build_for
+for_init  : (var_dec | expr_stmt | ";")
+for_cond  : expr?
+for_incr  : expr?
+
+
+if_cmd     : "if" "(" expr ")" stmt ("else" stmt)?
+
+while_cmd  : "while" "(" expr ")" stmt
 
 print_cmd  : "print" expr ";"
 
+ expr_stmt : expr ";" 
+
 // EXPRESSÕES
-?expr      : test
+
+block : "{" declarations* "}"
+
+?expr      : assignment
+
+var_dec    : "var" VAR ("=" expr)? ";"
+
+fun_decl   : "fun" function
+function   : VAR "(" func_params? ")" block -> function_def
+func_params: VAR ("," VAR)*
+
+?assignment: call "." VAR "=" assignment -> setattr
+           | VAR "=" assignment           -> assign
+           | logic_or
+
+
+?logic_or  : logic_or "or" logic_and   -> or_
+           | logic_and
+
+?logic_and : logic_and "and" test      -> and_
+           | test
 
 ?test      : test "==" cmp  -> eq
            | test "!=" cmp  -> ne
@@ -27,19 +69,25 @@ print_cmd  : "print" expr ";"
            | factor "-" term  -> sub
            | term
 
-?term      : term "*" atom   -> mul
-           | term "/" atom   -> div 
-           | atom
+?term      : term "*" unary -> mul   // <-- Alterado para 'unary'
+           | term "/" unary -> div   // <-- Alterado para 'unary'
+           | unary                   // <-- Alterado para 'unary'
 
-?atom      : NUMBER 
+?unary     : "!" unary -> not_       // <-- NOVA REGRA
+           | "-" unary -> neg        // <-- NOVA REGRA
+           | call
+
+?call      : atom
+           | call "." VAR      -> getatributo
+           | call "(" params ")" -> call
+
+?atom      : NUMBER
            | BOOL
            | VAR
            | STRING
            | NIL
            | "(" cmp ")"
-           | call
 
-call       : VAR "(" params ")"
 params     : [ expr ("," expr )* ]
 
 BOOL.2     : "true" | "false"

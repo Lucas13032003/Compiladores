@@ -3,69 +3,64 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .ctx import Ctx
-
-# Declaramos nossa classe base num módulo separado para esconder um pouco de
-# Python relativamente avançado de quem não se interessar pelo assunto.
-#
-# A classe Node implementa um método `pretty` que imprime as árvores de forma
-# legível. Também possui funcionalidades para navegar na árvore usando cursores
-# e métodos de visitação.
 from .node import Node
-
-
+from .runtime import LoxReturn, LoxFunction
 #
 # TIPOS BÁSICOS
 #
-
-# Tipos de valores que podem aparecer durante a execução do programa
 Value = bool | str | float | None
 
 
+# ===================================================================
+# PASSO 1: ADICIONAR FUNÇÕES AUXILIARES
+# ===================================================================
+
+def is_truthy(value: Value) -> bool:
+    """
+    Verifica se um valor é "verdadeiro" de acordo com as regras do Lox.
+    Apenas `nil` e `false` são considerados falsos.
+    """
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    return True
+
+
+def lox_str(value: Value) -> str:
+    """
+    Converte um valor Lox para a sua representação em string correta.
+    """
+    if value is None:
+        return "nil"
+    if isinstance(value, bool):
+        return str(value).lower()  # Converte True -> "true", False -> "false"
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))  # Evita imprimir .0 para números inteiros
+    return str(value)
+
+
 class Expr(Node, ABC):
-    """
-    Classe base para expressões.
-
-    Expressões são nós que podem ser avaliados para produzir um valor.
-    Também podem ser atribuídos a variáveis, passados como argumentos para
-    funções, etc.
-    """
-
+    """Classe base para expressões."""
 
 class Stmt(Node, ABC):
-    """
-    Classe base para comandos.
-
-    Comandos são associdos a construtos sintáticos que alteram o fluxo de
-    execução do código ou declaram elementos como classes, funções, etc.
-    """
-
+    """Classe base para comandos."""
 
 @dataclass
 class Program(Node):
-    """
-    Representa um programa.
-
-    Um programa é uma lista de comandos.
-    """
-
+    """Representa um programa."""
     stmts: list[Stmt]
 
     def eval(self, ctx: Ctx):
         for stmt in self.stmts:
             stmt.eval(ctx)
 
-
 #
 # EXPRESSÕES
 #
 @dataclass
 class BinOp(Expr):
-    """
-    Uma operação infixa com dois operandos.
-
-    Ex.: x + y, 2 * x, 3.14 > 3 and 3.14 < 4
-    """
-
+    """Uma operação infixa com dois operandos."""
     left: Expr
     right: Expr
     op: Callable[[Value, Value], Value]
@@ -75,15 +70,9 @@ class BinOp(Expr):
         right_value = self.right.eval(ctx)
         return self.op(left_value, right_value)
 
-
 @dataclass
 class Var(Expr):
-    """
-    Uma variável no código
-
-    Ex.: x, y, z
-    """
-
+    """Uma variável no código."""
     name: str
 
     def eval(self, ctx: Ctx):
@@ -92,198 +81,216 @@ class Var(Expr):
         except KeyError:
             raise NameError(f"variável {self.name} não existe!")
 
-
 @dataclass
 class Literal(Expr):
-    """
-    Representa valores literais no código, ex.: strings, booleanos,
-    números, etc.
-
-    Ex.: "Hello, world!", 42, 3.14, true, nil
-    """
-
+    """Representa valores literais no código."""
     value: Value
 
     def eval(self, ctx: Ctx):
         return self.value
 
+# ===================================================================
+# PASSO 2: CORRIGIR AS CLASSES And E Or
+# ===================================================================
 
 @dataclass
 class And(Expr):
-    """
-    Uma operação infixa com dois operandos.
+    """Operador lógico 'and' com curto-circuito."""
+    left: Expr
+    right: Expr
 
-    Ex.: x and y
-    """
-
+    def eval(self, ctx: Ctx):
+        left_value = self.left.eval(ctx)
+        # Usa a nossa nova função is_truthy
+        if not is_truthy(left_value):
+            return left_value
+        return self.right.eval(ctx)
 
 @dataclass
 class Or(Expr):
-    """
-    Uma operação infixa com dois operandos.
-    Ex.: x or y
-    """
+    """Operador lógico 'or' com curto-circuito."""
+    left: Expr
+    right: Expr
 
+    def eval(self, ctx: Ctx):
+        left_value = self.left.eval(ctx)
+        # Usa a nossa nova função is_truthy
+        if is_truthy(left_value):
+            return left_value
+        return self.right.eval(ctx)
 
 @dataclass
 class UnaryOp(Expr):
-    """
-    Uma operação prefixa com um operando.
+    """Uma operação prefixa com um operando."""
+    op: Callable
+    value: Expr
 
-    Ex.: -x, !x
-    """
-
+    def eval(self, ctx: Ctx):
+        v = self.value.eval(ctx)
+        return self.op(v)
 
 @dataclass
 class Call(Expr):
-    """
-    Uma chamada de função.
-
-    Ex.: fat(42)
-    """
-    name: str
+    """Uma chamada de função."""
+    obj: Expr
     params: list[Expr]
     
     def eval(self, ctx: Ctx):
-        func = ctx[self.name]
-        params = []
-        for param in self.params:
-            params.append(param.eval(ctx))
+        obj = self.obj.eval(ctx)
+        params = [param.eval(ctx) for param in self.params]
         
-        if callable(func):
-            return func(*params)
-        raise TypeError(f"{self.name} não é uma função!")
-
+        if callable(obj):
+            return obj(*params)
+        raise TypeError(f"{self.obj} não é uma função!")
 
 @dataclass
 class This(Expr):
-    """
-    Acesso ao `this`.
-
-    Ex.: this
-    """
-
+    """Acesso ao `this`."""
 
 @dataclass
 class Super(Expr):
-    """
-    Acesso a method ou atributo da superclasse.
-
-    Ex.: super.x
-    """
-
+    """Acesso a method ou atributo da superclasse."""
 
 @dataclass
 class Assign(Expr):
-    """
-    Atribuição de variável.
+    """Atribuição de variável."""
+    name: str
+    value: Expr
 
-    Ex.: x = 42
-    """
-
+    def eval(self, ctx: Ctx):
+        v = self.value.eval(ctx)
+        ctx[self.name] = v
+        return v
 
 @dataclass
 class Getattr(Expr):
-    """
-    Acesso a atributo de um objeto.
+    """Acesso a atributo de um objeto."""
+    value: Expr
+    attr: str
 
-    Ex.: x.y
-    """
-
-
+    def eval(self, ctx):
+        obj = self.value.eval(ctx)
+        return getattr(obj, self.attr)
+        
 @dataclass
 class Setattr(Expr):
-    """
-    Atribuição de atributo de um objeto.
+    """Atribuição de atributo de um objeto."""
+    obj: Expr
+    attr: str
+    value: Expr
 
-    Ex.: x.y = 42
-    """
-
+    def eval(self, ctx: Ctx):
+        obj = self.obj.eval(ctx)
+        v = self.value.eval(ctx)
+        setattr(obj, self.attr, v)
+        return v
 
 #
 # COMANDOS
 #
+
+# ===================================================================
+# PASSO 3: CORRIGIR A CLASSE Print
+# ===================================================================
+
 @dataclass
 class Print(Stmt):
-    """
-    Representa uma instrução de impressão.
-
-    Ex.: print "Hello, world!";
-    """
+    """Representa uma instrução de impressão."""
     expr: Expr
     
     def eval(self, ctx: Ctx):
         value = self.expr.eval(ctx)
-        print(value)
+        # Usa a nossa nova função lox_str para formatar a saída
+        print(lox_str(value))
 
 
 @dataclass
 class Return(Stmt):
-    """
-    Representa uma instrução de retorno.
-
-    Ex.: return x;
-    """
-
+    """Representa uma instrução de retorno."""
+    value: Expr | None = None
+    
+    def eval(self, ctx: Ctx):
+        # Avalia a expressão do return (se houver)
+        return_value = None
+        if self.value is not None:
+            return_value = self.value.eval(ctx)
+        
+        # Lança a exceção com o valor do retorno
+        raise LoxReturn(return_value)
 
 @dataclass
 class VarDef(Stmt):
     """
     Representa uma declaração de variável.
-
     Ex.: var x = 42;
     """
+    name: str
+    value: Expr | None = None
+
+    def eval(self, ctx: Ctx):
+        val = None
+        if self.value is not None:
+            val = self.value.eval(ctx)
+        
+        # Correção final: usar o método `var_def` que já existe no teu Ctx!
+        ctx.var_def(self.name, val)
 
 
 @dataclass
 class If(Stmt):
-    """
-    Representa uma instrução condicional.
+    """Representa uma instrução condicional."""
+    cond: Expr
+    then_branch: Stmt
+    else_branch: Stmt | None = None
 
-    Ex.: if (x > 0) { ... } else { ... }
-    """
-
-
-@dataclass
-class For(Stmt):
-    """
-    Representa um laço de repetição.
-
-    Ex.: for (var i = 0; i < 10; i++) { ... }
-    """
+    def eval(self, ctx:Ctx):
+        if is_truthy(self.cond.eval(ctx)):  # Bónus: Usar is_truthy aqui também!
+            return self.then_branch.eval(ctx)
+        elif self.else_branch is not None:
+            return self.else_branch.eval(ctx)
 
 
 @dataclass
 class While(Stmt):
-    """
-    Representa um laço de repetição.
+    """Representa um laço de repetição."""
+    expr: Expr
+    stmt: Stmt
 
-    Ex.: while (x > 0) { ... }
-    """
-
+    def eval(self, ctx: Ctx):
+        # Bónus: Usar is_truthy aqui também!
+        while is_truthy(self.expr.eval(ctx)):
+            self.stmt.eval(ctx)
 
 @dataclass
 class Block(Node):
-    """
-    Representa bloco de comandos.
+    """Representa bloco de comandos."""
+    stmts: list[Stmt]
 
-    Ex.: { var x = 42; print x;  }
-    """
-
-
+    def eval(self, ctx: Ctx):
+        # 1. Cria um novo contexto que tem o contexto atual como pai.
+        #    Isto é o nosso "push" de escopo.
+        new_ctx = Ctx(scope={}, parent=ctx)
+        
+        # 2. Executa os comandos DENTRO do novo contexto.
+        for stmt in self.stmts:
+            stmt.eval(new_ctx)
+        
+        # 3. O "pop" do escopo é automático quando o método termina.
 @dataclass
 class Function(Stmt):
-    """
-    Representa uma função.
+    """Representa uma declaração de função."""
+    name: str
+    params: list[str]
+    body: Block
 
-    Ex.: fun f(x, y) { ... }
-    """
-
-
+    def eval(self, ctx: Ctx):
+        # Cria a função "real" e captura o contexto atual como o seu closure.
+        lox_function = LoxFunction(self.name, self.params, self.body, ctx)
+        
+        # Define esta nova função "real" no contexto.
+        ctx.var_def(self.name, lox_function)
+        
+        return None
 @dataclass
 class Class(Stmt):
-    """
-    Representa uma classe.
-
-    Ex.: class B < A { ... }
-    """
+    """Representa uma classe."""
